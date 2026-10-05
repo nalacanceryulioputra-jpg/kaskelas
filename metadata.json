@@ -1,0 +1,7 @@
+{
+  "name": "KasKelas - Pengelolaan Kas Kelas Sekolah",
+  "description": "Aplikasi manajemen kas kelas transparan untuk Ketua, Bendahara, dan Siswa dengan pencatatan iuran, pemasukan, pengeluaran, dan laporan keuangan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
