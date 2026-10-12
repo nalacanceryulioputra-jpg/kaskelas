@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Wallet } from 'lucide-react';
-import { User, UserRole } from '../types';
+import { User } from '../types';
+import { CLASS_OPTIONS, getClassLabel, isClassId } from '../data/classes';
 
 interface StoredAccount {
   user: User;
@@ -13,6 +14,7 @@ interface AuthViewProps {
 }
 
 const accountsStorageKey = 'kaskelas_accounts';
+const maxTreasurerAccounts = 9;
 
 const readAccounts = (): StoredAccount[] => {
   try {
@@ -53,14 +55,17 @@ const createSalt = () =>
     .join('');
 
 export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'treasurer-setup'>('login');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<UserRole>('siswa');
+  const [selectedClassId, setSelectedClassId] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [treasurerAccountCount, setTreasurerAccountCount] = useState(
+    () => readAccounts().filter((account) => account.user.role === 'bendahara').length,
+  );
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -77,10 +82,25 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
           setError('Email atau kata sandi tidak sesuai.');
           return;
         }
-        onAuthenticated(account.user);
+        const classId = account.user.role === 'bendahara' && isClassId(account.user.classId)
+          ? account.user.classId
+          : selectedClassId;
+        if (!isClassId(classId)) {
+          setError('Pilih kelas terlebih dahulu.');
+          return;
+        }
+        if (account.user.role === 'bendahara' && account.user.classId !== classId) {
+          account.user.classId = classId;
+          localStorage.setItem(accountsStorageKey, JSON.stringify(accounts));
+        }
+        onAuthenticated({ ...account.user, classId });
         return;
       }
 
+      if (!isClassId(selectedClassId)) {
+        setError('Pilih kelas terlebih dahulu.');
+        return;
+      }
       if (password.length < 8) {
         setError('Kata sandi harus terdiri dari minimal 8 karakter.');
         return;
@@ -94,16 +114,29 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
         return;
       }
 
+      if (
+        mode === 'treasurer-setup' &&
+        accounts.filter((entry) => entry.user.role === 'bendahara').length >= maxTreasurerAccounts
+      ) {
+        setError(`Maksimal ${maxTreasurerAccounts} akun bendahara sudah dibuat.`);
+        setTreasurerAccountCount(maxTreasurerAccounts);
+        return;
+      }
+
       const user: User = {
         id: `u-${crypto.randomUUID()}`,
         name: name.trim(),
         email: normalizedEmail,
-        role,
+        role: mode === 'treasurer-setup' ? 'bendahara' : 'siswa',
+        ...(mode === 'treasurer-setup' ? { classId: selectedClassId } : {}),
       };
       const salt = createSalt();
       accounts.push({ user, salt, passwordHash: await hashPassword(password, salt) });
       localStorage.setItem(accountsStorageKey, JSON.stringify(accounts));
-      onAuthenticated(user);
+      if (user.role === 'bendahara') {
+        setTreasurerAccountCount((count) => count + 1);
+      }
+      onAuthenticated({ ...user, classId: selectedClassId });
     } catch {
       setError('Akun tidak dapat diproses. Periksa dukungan browser lalu coba lagi.');
     } finally {
@@ -111,7 +144,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
     }
   };
 
-  const switchMode = (nextMode: 'login' | 'signup') => {
+  const switchMode = (nextMode: 'login' | 'signup' | 'treasurer-setup') => {
     setMode(nextMode);
     setError('');
     setPassword('');
@@ -137,10 +170,14 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
           <div className="mb-7">
             <h2 className="text-2xl font-bold text-slate-900">
-              {mode === 'login' ? 'Selamat datang' : 'Buat akun'}
+              {mode === 'login' ? 'Selamat datang' : mode === 'signup' ? 'Daftar akun siswa' : 'Siapkan akun bendahara'}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              {mode === 'login' ? 'Masuk untuk melanjutkan ke KasKelas.' : 'Daftar untuk mulai menggunakan KasKelas.'}
+              {mode === 'login'
+                ? 'Masuk untuk melanjutkan ke KasKelas.'
+                : mode === 'signup'
+                  ? 'Pendaftaran mandiri hanya tersedia untuk siswa.'
+                  : `Isi slot akun bendahara (${treasurerAccountCount}/${maxTreasurerAccounts}).`}
             </p>
           </div>
 
@@ -166,7 +203,31 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === 'signup' && (
+            <div>
+              <label htmlFor="auth-class" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Kelas
+              </label>
+              <select
+                id="auth-class"
+                value={selectedClassId}
+                onChange={(event) => setSelectedClassId(event.target.value)}
+                required={mode !== 'login'}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="">Pilih kelas</option>
+                {CLASS_OPTIONS.map((classOption) => (
+                  <option key={classOption.id} value={classOption.id}>
+                    {getClassLabel(classOption)}
+                  </option>
+                ))}
+              </select>
+              {mode === 'login' && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Siswa memilih kelas setiap kali masuk. Bendahara memakai kelas yang ditetapkan pada akunnya.
+                </p>
+              )}
+            </div>
+            {mode !== 'login' && (
               <div>
                 <label htmlFor="signup-name" className="mb-1.5 block text-sm font-medium text-slate-700">Nama lengkap</label>
                 <input
@@ -179,21 +240,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
                   className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                   placeholder="Nama Anda"
                 />
-              </div>
-            )}
-            {mode === 'signup' && (
-              <div>
-                <label htmlFor="signup-role" className="mb-1.5 block text-sm font-medium text-slate-700">Peran</label>
-                <select
-                  id="signup-role"
-                  value={role}
-                  onChange={(event) => setRole(event.target.value as UserRole)}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                >
-                  <option value="siswa">Siswa</option>
-                  <option value="bendahara">Bendahara</option>
-                  <option value="ketua">Ketua Kelas</option>
-                </select>
               </div>
             )}
             <div>
@@ -215,15 +261,15 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
                 id="auth-password"
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                minLength={mode === 'signup' ? 8 : undefined}
+                minLength={mode !== 'login' ? 8 : undefined}
                 required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                placeholder={mode === 'signup' ? 'Minimal 8 karakter' : 'Masukkan kata sandi'}
+                placeholder={mode !== 'login' ? 'Minimal 8 karakter' : 'Masukkan kata sandi'}
               />
             </div>
-            {mode === 'signup' && (
+            {mode !== 'login' && (
               <div>
                 <label htmlFor="confirm-password" className="mb-1.5 block text-sm font-medium text-slate-700">Konfirmasi kata sandi</label>
                 <input
@@ -244,12 +290,36 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthenticated }) => {
 
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || (mode === 'treasurer-setup' && treasurerAccountCount >= maxTreasurerAccounts)}
               className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-60"
             >
-              {isSubmitting ? 'Memproses...' : mode === 'login' ? 'Masuk' : 'Buat akun'}
+              {isSubmitting
+                ? 'Memproses...'
+                : mode === 'login'
+                  ? 'Masuk'
+                  : mode === 'signup'
+                    ? 'Daftar sebagai siswa'
+                    : 'Buat akun bendahara'}
             </button>
           </form>
+          {mode === 'login' && treasurerAccountCount < maxTreasurerAccounts && (
+            <button
+              type="button"
+              onClick={() => switchMode('treasurer-setup')}
+              className="mt-4 w-full text-sm font-medium text-indigo-700 hover:text-indigo-800"
+            >
+              Siapkan akun bendahara ({treasurerAccountCount}/{maxTreasurerAccounts})
+            </button>
+          )}
+          {mode === 'treasurer-setup' && (
+            <button
+              type="button"
+              onClick={() => switchMode('login')}
+              className="mt-4 w-full text-sm font-medium text-slate-600 hover:text-slate-800"
+            >
+              Kembali ke masuk
+            </button>
+          )}
         </div>
       </section>
     </main>

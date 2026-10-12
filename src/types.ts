@@ -5,6 +5,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  classId?: string;
   nis?: string;
   avatar?: string;
 }
@@ -54,4 +55,10 @@ export interface ClassInfo {
   monthlyFee: number; // iuran per minggu
   ketuaName: string;
   bendaharaName: string;
+}
+
+export interface ClassFinancialData {
+  students: Student[];
+  transactions: Transaction[];
+  classInfo: ClassInfo;
 }
